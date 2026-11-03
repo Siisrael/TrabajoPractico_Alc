@@ -1,0 +1,9 @@
+# Pies de los atacantes (camiseta blanca) cerca de la linea del ultimo defensor, en test-fuera-de-juego.png, marcados a mano.
+# Una fila por pie visible; la primera columna identifica al jugador (puede tener uno o dos pies).
+# jugador  u [px]    v [px]
+1          796.0     350.0    # blanco de arriba del grupo
+2          790.0     470.0    # blanco que salta en el medio del grupo
+3          838.0     530.0    # blanco #24, pie izquierdo
+3          865.0     528.0    # blanco #24, pie derecho (tapado en parte por el #25: estimado)
+4          816.0     595.0    # blanco #25, pie izquierdo
+4          870.0     593.0    # blanco #25, pie derecho

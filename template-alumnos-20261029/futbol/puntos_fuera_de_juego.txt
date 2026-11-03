@@ -1,0 +1,13 @@
+# Correspondencias cancha -> foto para test-fuera-de-juego.png
+# Coordenadas de la cancha (U, V) en metros, segun el esquema estadio_azteca.png, con el arco en U = 105.
+# La camara esta del lado de la banda V = 0 y mira hacia V = 68: el arco queda a la derecha de la foto.
+# Coordenadas de la foto (u, v) en pixeles, marcadas a mano (esquinas = interseccion de las rectas de las lineas).
+# U [m]    V [m]      u [px]    v [px]
+105.0      68.0       1305.3    235.7    # banderin del corner (linea de meta con la banda lejana)
+88.5       54.16      736.0     317.5    # area grande, esquina del frente (lado lejano)
+88.5       13.84      734.7     755.6    # area grande, esquina del frente (lado cercano)
+105.0      54.16      1387.3    309.4    # area grande, lateral lejano con la linea de meta
+99.5       43.16      1230.6    389.5    # area chica, esquina del frente (lado lejano)
+99.5       24.84      1368.2    576.2    # area chica, esquina del frente (lado cercano)
+105.0      43.16      1473.7    386.9    # area chica, lateral lejano con la linea de meta
+105.0      37.66      1526.0    432.0    # base del palo izquierdo (mirando al arco), el unico visible

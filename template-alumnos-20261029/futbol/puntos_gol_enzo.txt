@@ -1,0 +1,12 @@
+# Correspondencias cancha -> foto para test-gol-enzo.png
+# Coordenadas de la cancha (U, V) en metros, segun el esquema estadio_azteca.png, con el arco en U = 105.
+# Coordenadas de la foto (u, v) en pixeles, marcadas a mano.
+# U [m]    V [m]      u [px]   v [px]
+105.0      43.16      193.4    170.8    # area chica, esquina sobre la linea de meta (izq. en la foto)
+105.0      24.84      841.0    189.2    # area chica, esquina sobre la linea de meta (der. en la foto)
+99.5       43.16      157.2    231.3    # area chica, esquina del frente (izq.)
+99.5       24.84      868.0    251.5    # area chica, esquina del frente (der.)
+105.0      37.66      388.0    176.5    # base del palo izquierdo
+105.0      30.34      651.0    183.5    # base del palo derecho
+88.5       41.3125    147.5    405.8    # medialuna corta la linea del area grande (izq.): V = 34 + sqrt(9.15^2 - 5.5^2)
+88.5       26.6875    850.0    422.0    # medialuna corta la linea del area grande (der.): V = 34 - sqrt(9.15^2 - 5.5^2)
