@@ -1108,3 +1108,433 @@ def svd_reducida(A, k="max", tol=1e-15):
     if not switch:
         hatU, hatV = hatV, hatU
     return hatU, hatSig, hatV
+
+
+# ====================================================================================================
+# Funciones del TP - Calibración y Pose de la Cámara
+# Son las mismas que están en la notebook; acá llaman directo a las funciones de este módulo (sin "alc.").
+# ====================================================================================================
+
+
+# ----------------------------------------------------------------------------------------------------
+# Ejercicio 2 - Calibración con puntos 3D (DLT)
+# ----------------------------------------------------------------------------------------------------
+
+
+def obtenerQ3d(imgPts, objPts):
+    '''
+    Arma la matriz Q de la ecuación 6 del enunciado, cuyo núcleo contiene a la matriz de proyección
+    vectorizada m = (m11, m12, m13, m14, m21, ..., m34).
+    Parámetros:
+        imgPts: array de n x 2 con las coordenadas (u, v) de los puntos en la imagen, en píxeles.
+        objPts: array de n x 3 con las coordenadas (U, V, W) de los mismos puntos en el mundo.
+    Devuelve:
+        Q: matriz de 2n x 12 (dos filas por punto).
+    '''
+    n = imgPts.shape[0]
+    Q = np.zeros((2*n,12))
+
+    for i in range(n): 
+
+        U, V, W = objPts[i,0], objPts[i,1], objPts[i,2]
+        u, v = imgPts[i]
+
+        ecuacionRespecto_u = 2*i
+        ecuacionRespecto_v = 2*i + 1 
+
+        Q[ecuacionRespecto_u] = [ U, V, W, 1, 
+                                  0, 0, 0, 0, 
+                               -u*U, -u*V, -u*W, -u ]
+
+        Q[ecuacionRespecto_v] = [ 0, 0, 0, 0,
+                                  U, V, W, 1, 
+                               -v*U, -v*V, -v*W, -v ]
+
+    return Q
+
+
+def resolverDLT3D(Q):
+    '''
+    Encuentra la matriz de proyección M resolviendo min ||Q m|| con ||m|| = 1 (ecuación 8).
+    Por el Ejercicio 1 b), la solución es el autovector de Q^T Q asociado al menor autovalor.
+    Parámetros:
+        Q: matriz de 2n x 12 armada con obtenerQ3d.
+    Devuelve:
+        M: matriz de proyección de 3 x 4, definida a menos de un factor de escala (sale con norma 1).
+    '''
+
+    Q_traspuesta = trasponer(Q)
+    A = mult_matricial(Q_traspuesta, Q)
+    
+    V, D = diagRH(A)
+
+    autoval_min = 0
+    for j in range(1, D.shape[0]):
+        if D[j, j] < D[autoval_min, autoval_min]:
+            autoval_min = j
+
+    m = V[:, autoval_min]
+    M = m.reshape(3, 4)
+
+    return M
+
+
+def determinante3x3(A):
+    '''
+    Calcula el determinante de una matriz de 3 x 3 desarrollando por la primera fila.
+    Parámetros:
+        A: matriz de 3 x 3.
+    Devuelve:
+        el determinante de A (un número).
+    '''
+
+    determinante = ( A[0, 0] * (A[1, 1] * A[2, 2] - A[1, 2] * A[2, 1])
+                    -A[0, 1] * (A[1, 0] * A[2, 2] - A[1, 2] * A[2, 0])
+                    +A[0, 2] * (A[1, 0] * A[2, 1] - A[1, 1] * A[2, 0]) )
+    return determinante
+
+
+def devolverMatricesCalibracion3d(M, focos_iguales=False, sin_sesgo=False):
+    '''
+    Descompone la matriz de proyección M = s K [R | t] en los intrínsecos K, la rotación R y la traslación t.
+    Aplica la factorización QR del módulo a P A^T P (P invierte el orden de filas y columnas), para escribir
+    las primeras tres columnas de M como triangular superior (K) por ortogonal (R). Así R sale ortonormal.
+    Parámetros:
+        M: matriz de proyección de 3 x 4, a menos de un factor de escala (por ejemplo, la de resolverDLT3D).
+        focos_iguales: si es True, impone alpha_u = alpha_v (las reemplaza por su promedio).
+        sin_sesgo: si es True, impone K12 = 0 (sesgo nulo).
+    Devuelve:
+        R: matriz de rotación de 3 x 3 (ortonormal, con det(R) = 1).
+        t: vector de traslación de largo 3.
+        K: matriz de intrínsecos de 3 x 3, triangular superior, con diagonal positiva y K[2, 2] = 1.
+    '''
+    # M = s K [R | t]: las primeras 3 columnas son s K R y la última es s K t
+    A = M[:, :3]
+    b = M[:, 3]
+
+    # P da vuelta el orden de las filas y columnas (P P = I). La usamos para poder sacar K y R con la QR
+    P = np.array([
+        [0, 0, 1],
+        [0, 1, 0],
+        [1, 0, 0]
+    ])
+
+    # Necesitamos A = (triangular superior) * (ortogonal), pero la QR del módulo da al revés
+    # (ortogonal * triangular superior). 
+    B = mult_matricial(P, trasponer(A))
+    B = mult_matricial(B, P)
+
+    Q_qr, R_qr = calculaQR(B, metodo="RH")
+
+    # Como P A^T P = Q_qr R_qr, despejando queda A = (P R_qr^T P)(P Q_qr^T P)
+    # P R_qr^T P es triangular superior -> es K (todavía sin arreglar signos ni escala)
+    K0 = mult_matricial(P, trasponer(R_qr))
+    K0 = mult_matricial(K0, P)
+
+    # P Q_qr^T P es ortogonal -> es R
+    R0 = mult_matricial(P, trasponer(Q_qr))
+    R0 = mult_matricial(R0, P)
+
+    # La diagonal de K tiene las focales, que tienen que ser positivas. Con D = diag(+-1) arreglamos los signos:
+    # como D D = I, K0 D D R0 = K0 R0, así que el producto no cambia
+    D = np.zeros((3, 3))
+    for i in range(3):
+        D[i, i] = signo(K0[i, i])
+
+    K1 = mult_matricial(K0, D)
+    R1 = mult_matricial(D, R0)
+
+    # R tiene que ser una rotación (det = 1). Si da -1 es porque M vino con el signo cambiado
+    # (m y -m son las dos solución del DLT), así que le cambiamos el signo a R (y más abajo a b)
+    signo_det = signo(determinante3x3(R1))
+    R = signo_det * R1
+
+    # M está definida a menos de escala: normalizamos K para que K[2, 2] = 1 (como en la sección 2.2 g)
+    c = K1[2, 2]
+    K = K1 / c
+
+    # Inciso d): restricciones opcionales sobre K
+    if focos_iguales:
+        # alpha_u = alpha_v: reemplazamos las dos focales por su promedio
+        alpha = (K[0, 0] + K[1, 1]) / 2
+        K[0, 0] = alpha
+        K[1, 1] = alpha
+
+    if sin_sesgo:
+        # K12 = 0: sacamos el sesgo
+        K[0, 1] = 0
+
+    # La última columna de M es s K t: le sacamos el signo y la escala, y despejamos t de K t = b
+    # (K es triangular superior, así que alcanza con sustitución hacia atrás)
+    b_normalizada = signo_det * b / c
+
+    t = res_tri(K, b_normalizada, inferior=False)
+
+    return R, t, K
+
+
+# ----------------------------------------------------------------------------------------------------
+# Ejercicio 3 - Calibración con puntos coplanares (Zhang)
+# Auxiliares: autovectorMinimo, matrizNormalizacion, aplicarTransformacion, estimarHomografia, vectorV, cholesky,
+# productoVectorial y ortonormalizarRotacion (las usan las funciones pedidas)
+# ----------------------------------------------------------------------------------------------------
+
+
+def autovectorMinimo(A):
+    '''
+    Calcula el autovector asociado al menor autovalor de una matriz simétrica,
+    que por el Ejercicio 1 b) es la solución de min ||Qx|| con ||x|| = 1 cuando A = Q^T Q.
+    Parámetros:
+        A: matriz simétrica de n x n.
+    Devuelve:
+        vector de largo n, de norma 1.
+    '''
+    autovectores, autovalores = diagRH(A)
+
+    # Buscamos la posición del menor autovalor en la diagonal
+    autoval_min = 0
+    for j in range(1, autovalores.shape[0]):
+        if autovalores[j, j] < autovalores[autoval_min, autoval_min]:
+            autoval_min = j
+
+    return autovectores[:, autoval_min]
+
+
+def matrizNormalizacion(puntos):
+    '''
+    Arma la matriz de normalización isotrópica de Hartley (sección 2.3 del enunciado).
+    Parámetros:
+        puntos: array de n x 2 con coordenadas cartesianas.
+    Devuelve:
+        T: matriz de 3 x 3 que, en coordenadas homogéneas, lleva el centroide de los puntos
+           al origen y los escala para que su distancia media al origen sea sqrt(2).
+    '''
+    centroide = np.mean(puntos, axis=0)
+    distancia_media = np.mean(np.sqrt(np.sum((puntos - centroide)**2, axis=1)))
+    escala = np.sqrt(2) / distancia_media
+    return np.array([[escala, 0, -escala*centroide[0]],
+                     [0, escala, -escala*centroide[1]],
+                     [0, 0, 1]])
+
+
+def aplicarTransformacion(T, puntos):
+    '''
+    Aplica una transformación proyectiva a un conjunto de puntos del plano.
+    Parámetros:
+        T: matriz de 3 x 3 (normalización u homografía).
+        puntos: array de n x 2 con coordenadas cartesianas.
+    Devuelve:
+        array de n x 2 con los puntos transformados, en coordenadas cartesianas.
+    '''
+    # Pasamos a coordenadas homogéneas agregando una columna de unos
+    puntos_homogeneos = np.hstack([puntos, np.ones((puntos.shape[0], 1))])
+
+    # Aplicamos T a cada punto (como columnas) y volvemos a dejar un punto por fila
+    transformados = trasponer(mult_matricial(T, trasponer(puntos_homogeneos)))
+
+    # Dividimos por la tercera coordenada para volver a coordenadas cartesianas
+    return transformados[:, :2] / transformados[:, 2:]
+
+
+def obtenerQ2d(imgPts, objPts):
+    '''
+    Arma la matriz Q de la ecuación 11 del enunciado, cuyo núcleo contiene a la homografía vectorizada
+    h = (h1, h2, h3), donde h1^T, h2^T, h3^T son las filas de H.
+    Parámetros:
+        imgPts: array de n x 2 con las coordenadas (u, v) de los puntos en la imagen.
+        objPts: array de n x 2 con las coordenadas (U, V) de los mismos puntos en el plano del tablero (W = 0).
+    Devuelve:
+        Q: matriz de 2n x 9.
+    '''
+    n = imgPts.shape[0]
+    Q = np.zeros((2*n, 9))
+    cero = np.zeros(3)
+
+    for i in range(n):
+        # Punto del tablero en coordenadas homogéneas: P_i = (U_i, V_i, 1)
+        P_i = np.array([objPts[i, 0], objPts[i, 1], 1])
+        u_i, v_i = imgPts[i]
+
+        # Cada correspondencia aporta dos filas, con los bloques de la ecuación 11:
+        #   [ P_i^T   0^T    -u_i P_i^T ]
+        #   [ 0^T     P_i^T  -v_i P_i^T ]
+        Q[2*i]     = np.hstack([P_i, cero, -u_i*P_i])
+        Q[2*i + 1] = np.hstack([cero, P_i, -v_i*P_i])
+
+    return Q
+
+
+def estimarHomografia(imgPts, objPts):
+    '''
+    Estima la homografía H que lleva los puntos del tablero a la imagen, usando DLT con normalización isotrópica.
+    Parámetros:
+        imgPts: array de n x 2 con las coordenadas (u, v) en la imagen.
+        objPts: array de n x 2 con las coordenadas (U, V) en el tablero.
+    Devuelve:
+        H: matriz de 3 x 3 con H[2, 2] = 1.
+    '''
+    # Normalizamos ambos conjuntos de puntos
+    T_img = matrizNormalizacion(imgPts)
+    T_world = matrizNormalizacion(objPts)
+    imgPts_norm = aplicarTransformacion(T_img, imgPts)
+    objPts_norm = aplicarTransformacion(T_world, objPts)
+
+    # DLT sobre los puntos normalizados: h es el autovector de Q^T Q con menor autovalor
+    Q = obtenerQ2d(imgPts_norm, objPts_norm)
+    h = autovectorMinimo(mult_matricial(trasponer(Q), Q))
+    H_norm = h.reshape(3, 3)
+
+    # Deshacemos la normalización (ecuación 14): H = T_img^-1 H_norm T_world
+    H = mult_matricial(mult_matricial(inversa(T_img), H_norm), T_world)
+    return H / H[2, 2]
+
+
+def vectorV(H, i, j):
+    '''
+    Arma el vector v_ij que cumple c_i^T B c_j = v_ij^T b, siendo c_i y c_j columnas de H.
+    Parámetros:
+        H: homografía de 3 x 3.
+        i, j: índices (0, 1 o 2) de las columnas de H.
+    Devuelve:
+        vector de largo 6.
+    '''
+    ci, cj = H[:, i], H[:, j]
+    return np.array([ci[0]*cj[0],
+                     ci[0]*cj[1] + ci[1]*cj[0],
+                     ci[1]*cj[1],
+                     ci[2]*cj[0] + ci[0]*cj[2],
+                     ci[2]*cj[1] + ci[1]*cj[2],
+                     ci[2]*cj[2]])
+
+
+def armarA(Hlst):
+    '''
+    Arma la matriz A del sistema A b = 0, con dos filas por cada homografía.
+    Parámetros:
+        Hlst: lista de N homografías de 3 x 3, una por imagen.
+    Devuelve:
+        A: matriz de 2N x 6.
+    '''
+    filas = []
+    for H in Hlst:
+        # Llevamos H a norma 1 para que todas las imágenes pesen lo mismo en el sistema
+        H = H / norma(H.reshape(9), 2)
+        filas.append(vectorV(H, 0, 1))                    # r1^T r2 = 0
+        filas.append(vectorV(H, 0, 0) - vectorV(H, 1, 1))  # ||r1|| = ||r2||
+    return np.array(filas)
+
+
+def cholesky(B):
+    '''
+    Calcula la factorización de Cholesky B = L L^T a partir de la factorización LDV del módulo ALC.
+    Parámetros:
+        B: matriz simétrica definida positiva de n x n.
+    Devuelve:
+        L: matriz triangular inferior con diagonal positiva.
+    '''
+    # Como B es simétrica, B = L' D L'^T, con L' triangular inferior con unos en la diagonal
+    L_unos, D, _ = calculaLDV(B)
+
+    # Como B es definida positiva, D tiene diagonal positiva y L = L' sqrt(D)
+    raiz_D = np.zeros(D.shape)
+    for i in range(D.shape[0]):
+        raiz_D[i, i] = np.sqrt(D[i, i])
+    return mult_matricial(L_unos, raiz_D)
+
+
+def calcularMatrizK2D(A):
+    '''
+    Calcula la matriz de parámetros intrínsecos K a partir de la matriz A del método de Zhang.
+    Parámetros:
+        A: matriz de 2N x 6 armada con armarA.
+    Devuelve:
+        K: matriz de 3 x 3 triangular superior con K[2, 2] = 1.
+    '''
+    # b es el autovector de A^T A con menor autovalor (Ejercicio 1 b)
+    B11, B12, B22, B13, B23, B33 = autovectorMinimo(mult_matricial(trasponer(A), A))
+    B = np.array([[B11, B12, B13],
+                  [B12, B22, B23],
+                  [B13, B23, B33]])
+
+    # El signo de b es arbitrario: elegimos el que hace a B definida positiva
+    if B[0, 0] < 0:
+        B = -B
+
+    # B = L L^T con L = K^-T, entonces K = (L^T)^-1
+    L = cholesky(B)
+    K = inversa(trasponer(L))
+
+    # B se conoce a menos de una escala: normalizamos para que K[2, 2] = 1
+    return K / K[2, 2]
+
+
+def productoVectorial(a, b):
+    '''
+    Calcula el producto vectorial entre dos vectores de R^3.
+    Parámetros:
+        a, b: vectores de largo 3.
+    Devuelve:
+        vector de largo 3 perpendicular a a y a b.
+    '''
+    return np.array([a[1]*b[2] - a[2]*b[1],
+                     a[2]*b[0] - a[0]*b[2],
+                     a[0]*b[1] - a[1]*b[0]])
+
+
+def ortonormalizarRotacion(r1, r2):
+    '''
+    Arma una matriz de rotación a partir de r1 y r2 aproximados, usando Gram-Schmidt.
+    Por el ruido, r1 y r2 no salen exactamente perpendiculares ni de norma 1.
+    Parámetros:
+        r1, r2: vectores de largo 3 (las dos primeras columnas de R, con ruido).
+    Devuelve:
+        R: matriz de rotación de 3 x 3 (R^T R = I y det(R) = 1).
+    '''
+    # Normalizamos r1
+    q1 = r1 / norma(r1, 2)
+
+    # A r2 le sacamos la parte que tiene en la dirección de q1 (así queda perpendicular) y lo normalizamos
+    q2 = r2 - producto_int(r2, q1) * q1
+    q2 = q2 / norma(q2, 2)
+
+    # La tercera columna con el producto vectorial: es perpendicular a q1 y q2 y deja det(R) = 1
+    q3 = productoVectorial(q1, q2)
+
+    R = np.zeros((3, 3))
+    R[:, 0], R[:, 1], R[:, 2] = q1, q2, q3
+    return R
+
+
+def obtenerPose2D(Hj, K):
+    '''
+    Calcula la pose (R, t) de una vista a partir de su homografía y de la matriz de intrínsecos.
+    Parámetros:
+        Hj: homografía de 3 x 3 que lleva los puntos (U, V, 1) del tablero a la imagen.
+        K: matriz de parámetros intrínsecos de 3 x 3.
+    Devuelve:
+        R: matriz de rotación de 3 x 3.
+        t: vector de traslación de largo 3, en las mismas unidades que las coordenadas del tablero.
+    '''
+    K_inv = inversa(K)
+
+    # Columnas de H llevadas al sistema de la cámara: K^-1 c_k = s r_1, s r_2, s t
+    K_inv_c1 = multMatVec(K_inv, Hj[:, 0])
+    K_inv_c2 = multMatVec(K_inv, Hj[:, 1])
+    K_inv_c3 = multMatVec(K_inv, Hj[:, 2])
+
+    # La escala sale de que r_1 tiene norma 1
+    escala = 1 / norma(K_inv_c1, 2)
+
+    # Elegimos el signo que deja el tablero delante de la cámara (t_z > 0)
+    if K_inv_c3[2] < 0:
+        escala = -escala
+
+    r1 = escala * K_inv_c1
+    r2 = escala * K_inv_c2
+    t = escala * K_inv_c3
+
+    # Por el ruido, r1 y r2 no salen exactamente ortonormales: armamos R con Gram-Schmidt y r3 = r1 x r2
+    # (restricción de rotación, sección 2.2 h)
+    R = ortonormalizarRotacion(r1, r2)
+
+    return R, t
